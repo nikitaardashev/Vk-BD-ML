@@ -17,7 +17,7 @@ from tensorflow.keras.layers.experimental.preprocessing import (
 
 parser = argparse.ArgumentParser(description='train model on dataset')
 parser.add_argument('-bs', '--batch_size', metavar="N",
-                    dest='batch_size', default=32, type=int)
+                    dest='batch_size', default=64, type=int)
 parser.add_argument('-mf', '--max_features', metavar="N",
                     dest='max_features', default=20000, type=int)
 parser.add_argument('-sl', '--sequence_length', metavar="N",
@@ -66,15 +66,7 @@ def get_optimizer():
     return tf.keras.optimizers.Adam(lr_schedule)
 
 
-def custom_standardization(input_data):
-    lowercase = tf.strings.lower(input_data)
-    return tf.strings.regex_replace(lowercase,
-                                    '[%s]' % re.escape(string.punctuation),
-                                    '')
-
-
 vectorize_layer = TextVectorization(
-    standardize=custom_standardization,
     max_tokens=max_features,
     output_mode='int',
     output_sequence_length=sequence_length)
@@ -100,6 +92,7 @@ raw_val_ds = preprocessing.text_dataset_from_directory(
     seed=seed)
 raw_test_ds = raw_val_ds
 
+print("Performing adapt ...")
 train_text = raw_train_ds.map(lambda x, y: x)
 vectorize_layer.adapt(train_text)
 
@@ -110,7 +103,6 @@ if logging:
     except FileNotFoundError:
         pass
 
-print("\nText vectorization...")
 train_ds = raw_train_ds.map(vectorize_text)
 val_ds = raw_val_ds.map(vectorize_text)
 test_ds = raw_test_ds.map(vectorize_text)
@@ -134,9 +126,9 @@ export_model.compile(get_optimizer(), loss_f, metrics)
 # Input shape is determined from calling .predict()
 export_model.predict(['лингвистика'])
 export_model.save('model')
-with open('model/class_names.txt', 'w') as f:
+with open('../model/class_names.txt', 'w') as f:
     for label in raw_train_ds.class_names:
-        f.write(label)
+        f.write(f'{label}\n')
 
 if logging:
     with open('stat.txt', 'a') as f:
