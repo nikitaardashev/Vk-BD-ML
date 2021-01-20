@@ -1,5 +1,11 @@
+if __name__ == '__main__':
+    # Search imports in parent directory (for model.predictor)
+    import sys
+    sys.path.insert(0, '..')
+
 from random import randint
 from typing import List, Union, Dict
+from model.predictor import Predictor
 
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
@@ -12,8 +18,10 @@ class Bot:
         self.service_token = ''  # сервисный ключ доступа (из приложения)
         self.app_id = 0  # ID приложения
         self.client_secret = ''  # защищённый ключ (из приложения)
-        self.group_session = vk_api.VkApi(token=self.group_token, api_version='5.126')
-        self.service_session = vk_api.VkApi(app_id=self.app_id, token=self.service_token,
+        self.group_session = vk_api.VkApi(token=self.group_token,
+                                          api_version='5.126')
+        self.service_session = vk_api.VkApi(app_id=self.app_id,
+                                            token=self.service_token,
                                             client_secret=self.client_secret)
         self.long_poll = VkBotLongPoll(self.group_session, self.group_id)
         self.group_api = self.group_session.get_api()
@@ -21,7 +29,9 @@ class Bot:
 
     def send_message(self, user_id: int, message: str) -> None:
         """
-        sends a message to user using method messages.send (https://vk.com/dev/messages.send)
+        sends a message to user using method messages.send
+        (https://vk.com/dev/messages.send)
+
         :param user_id: recipient user ID
         :param message: message text
         :return: None
@@ -33,7 +43,9 @@ class Bot:
 
     def get_posts(self, owner_id: int, count: int = 1) -> Union[List[dict], dict]:
         """
-        gets posts from user's or group's wall using method wall.get (https://vk.com/dev/wall.get)
+        gets posts from user's or group's wall using method wall.get
+        (https://vk.com/dev/wall.get)
+
         :param owner_id: wall's owner ID
         :param count: count of posts
         :return: list of dictionaries of dictionary, describing post
@@ -44,7 +56,9 @@ class Bot:
 
     def get_subscriptions(self, user_id: int, extended: bool = False) -> List[int]:
         """
-        gets user's subscriptions using method users.getSubscriptions (https://vk.com/dev/users.getSubscriptions)
+        gets user's subscriptions using method users.getSubscriptions
+        (https://vk.com/dev/users.getSubscriptions)
+
         :param user_id: user ID
         :param extended: get extended information or not
         :return: list of numbers defining user IDs
@@ -55,9 +69,12 @@ class Bot:
 
     def get_group_info(self, group_id: int) -> Union[Dict[str, Union[str, int]], List[Dict[str, Union[str, int]]]]:
         """
-        gets information about one or more groups using method groups.getById (https://vk.com/dev/groups.getById)
+        gets information about one or more groups using method groups.getById
+        (https://vk.com/dev/groups.getById)
+
         :param group_id: group ID
-        :return: list of dictionaries of dictionary, describing information about group
+        :return: list of dictionaries of dictionary, describing information
+        about group
         """
         info = self.service_api.groups.getById(group_id=group_id)
         print(f'received info from {group_id}')

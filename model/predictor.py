@@ -11,7 +11,13 @@ class Predictor:
                 self.class_names.append(line.rstrip())
 
     def predict(self, text_list):
+        """return list of class predictions based on list of strings"""
         if isinstance(text_list, str):
             text_list = [text_list]
-        prediction = list(self.model.predict(text_list)[0])
-        return self.class_names[prediction.index(max(prediction))]
+        return [self.class_names[list(pr).index(max(pr))]
+                for pr in self.model.predict(text_list)]
+
+
+if __name__ == '__main__':
+    p = Predictor('export_model')
+    print(p.predict('олег'))
