@@ -3,12 +3,16 @@ if __name__ == '__main__':
     import sys
     sys.path.insert(0, '..')
 
-from random import randint
+import json
 from typing import List, Union, Dict
-from model.predictor import Predictor
-
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+from vk_api.utils import get_random_id
+
+from model.predictor import Predictor
+from database import db_session
+from database.models.UserStatuses import UserStatuses
 
 
 class Bot:
@@ -18,6 +22,7 @@ class Bot:
         self.service_token = ''  # сервисный ключ доступа (из приложения)
         self.app_id = 0  # ID приложения
         self.client_secret = ''  # защищённый ключ (из приложения)
+        self.database_session = db_session.create_session()
         self.group_session = vk_api.VkApi(token=self.group_token,
                                           api_version='5.126')
         self.service_session = vk_api.VkApi(app_id=self.app_id,
@@ -27,18 +32,20 @@ class Bot:
         self.group_api = self.group_session.get_api()
         self.service_api = self.service_session.get_api()
 
-    def send_message(self, user_id: int, message: str) -> None:
+    def send_message(self, user_id: int, message: str, keyboard: str = None) -> None:
         """
         sends a message to user using method messages.send
         (https://vk.com/dev/messages.send)
 
         :param user_id: recipient user ID
         :param message: message text
+        :param keyboard: json describing keyboard attached with message
         :return: None
         """
         self.group_api.messages.send(user_id=user_id,
-                                     random_id=randint(0, 2147483647),
-                                     message=message)
+                                     random_id=get_random_id(),
+                                     message=message,
+                                     keyboard=keyboard)
         print(f'message {message[:15]}{"..." if len(message) > 15 else ""} to {user_id} has been sent')
 
     def get_posts(self, owner_id: int, count: int = 1) -> Union[List[dict], dict]:
@@ -90,18 +97,50 @@ class Bot:
         """
         for event in self.long_poll.listen():
             if event.type == VkBotEventType.MESSAGE_NEW:
-                subscriptions = self.get_subscriptions(event.object.message['from_id'])
-                for i, group_id in enumerate(subscriptions):
-                    if i > 10:
-                        break
-                    group_info = self.get_group_info(group_id)
-                    try:
-                        group_post = self.get_posts(-group_id)
-                        message = f'{group_info["name"]}\n{group_post["text"]}'
-                    except vk_api.ApiError:
-                        message = f'{group_info["name"]}\nнет доступа'
-                    self.send_message(event.object.message['from_id'], message)
-                self.send_message(event.object.message['from_id'], 'канец')
+                self.process_new_message(event)
+
+    def process_new_message(self, event):
+        from_id = event.object['message']['from_id']
+        payload = json.loads(event.object['message']['payload'])
+        if 'command' in payload and payload['command'] == 'start':
+            keyboard = VkKeyboard(one_time=True)
+            keyboard.add_button('Начать анализ',
+                                color=VkKeyboardColor.POSITIVE,
+                                payload=json.dumps({'button': 'start_analysis'}))
+            message = 'Перед началом анализа, пожалуйста, откройте список ваших' \
+                      ' групп для всех пользователей в настройках приватности.'
+            self.send_message(from_id, message, keyboard.get_keyboard())
+            user_status = self.database_session.query(UserStatuses).filter(UserStatuses.user_id == from_id).first()
+            if user_status:
+                user_status.status = 'started'
+            else:
+                self.database_session.add(UserStatuses(user_id=from_id, status='started'))
+            self.database_session.commit()
+        elif 'button' in payload:
+            message = 'Анализ начат. Пожалуйста, подождите.'
+            self.send_message(from_id, message)
+            # TODO:
+            #  1. получить подписки пользователя методом get_subscriptions (обработать приватную страницу)
+            #  2. получить n(?) постов с каждой, взять текст поста (одной строкой?)
+            #  3. вызвать predict нейросети, получить вероятности отношения к каждой категории
+            #  4. отправить сообщение с тремя(?) наиболее вероятными категориями
+            #  5. показать первую страницу рекомендаций
+
+            message = '1. [Категория 1] - XX%\n2. [Категория 2] - XX%\n3. [Категория 3] - XX%'
+            self.send_message(from_id, message)
+            groups_ids = [338, 376, 817]
+            groups_names = [self.get_group_info(_id)['name'] for _id in groups_ids]
+            message = '\n'.join([f'{i + 1}. {groups_names[i]} -- https://vk.com/club{groups_ids[i]}'
+                                 for i in range(len(groups_ids))])
+            keyboard = VkKeyboard(one_time=True)
+            keyboard.add_button('Начать анализ повторно',
+                                color=VkKeyboardColor.SECONDARY,
+                                payload=json.dumps({'button': 'start_analysis'}))
+            self.send_message(from_id, message, keyboard.get_keyboard())
+            user_status = self.database_session.query(UserStatuses).filter(UserStatuses.user_id == from_id).first()
+            user_status.status = 'show_page'
+            user_status.page = 1
+            self.database_session.commit()
 
 
 if __name__ == '__main__':
