@@ -1,8 +1,6 @@
 from tensorflow.keras.models import load_model
-from tensorflow.keras.backend import manual_variable_initialization
-manual_variable_initialization(True)
 
-from tensorflow.keras import Sequential, layers, models, losses, metrics
+from tensorflow.keras import Sequential, layers
 from tensorflow.keras.layers.experimental.preprocessing import (
         TextVectorization)
 

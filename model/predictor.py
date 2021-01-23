@@ -1,5 +1,5 @@
 import os
-from tensorflow.keras import Sequential, layers, models, losses, metrics
+from tensorflow.keras import Sequential, layers, models
 from tensorflow.keras.layers.experimental.preprocessing import (
         TextVectorization)
 
@@ -7,12 +7,13 @@ from tensorflow.keras.layers.experimental.preprocessing import (
 class Predictor:
     def __init__(self, model_path):
         self.model = None
-        self.load_model(model_path)
-
         self.class_names = []
+
         with open(os.path.join(model_path, 'class_names.txt'), 'r') as f:
             for line in f.readlines():
                 self.class_names.append(line.rstrip())
+
+        self.load_model(model_path)
 
     def predict(self, text_list):
         """return list of class predictions based on list of strings"""
@@ -24,20 +25,30 @@ class Predictor:
     def load_model(self, model_path):
         ckpt = os.path.join(model_path, 'checkpoint')
         if os.path.isfile(ckpt):
+            try:
+                with open(os.path.join(model_path, 'params.txt'), 'r') as f:
+                    max_features = int(f.readline())
+                    sequence_length = int(f.readline())
+                    embedding_dim = int(f.readline())
+            except FileNotFoundError:
+                max_features = 20000
+                sequence_length = 40
+                embedding_dim = 160
+
             vectorize_layer = TextVectorization(
-                max_tokens=20000,
+                max_tokens=max_features,
                 output_mode='int',
-                output_sequence_length=40)
+                output_sequence_length=sequence_length)
 
             # ATTENTION: this model MUST be absolutely
             # identical to the original one
             self.model = Sequential([vectorize_layer, Sequential([
-                layers.Embedding(20001, 160),
+                layers.Embedding(max_features + 1, embedding_dim),
                 layers.Dropout(0.3),
                 layers.GlobalAveragePooling1D(),
                 layers.Dropout(0.3),
-                layers.Dense(40)])])
-            self.model.load_weights('weights/checkpoint')
+                layers.Dense(len(self.class_names))])])
+            self.model.load_weights(ckpt)
         else:
             self.model = models.load_model(model_path)
 

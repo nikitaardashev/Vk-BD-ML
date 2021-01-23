@@ -26,6 +26,8 @@ if __name__ == '__main__':
                         help="output dimension of embedding layer")
     parser.add_argument('-e', '--epochs', metavar="N",
                         dest='epochs', default=10, type=int)
+    parser.add_argument('-d', '--dropout', metavar="N",
+                        dest='epochs', default=0.3, type=int)
     parser.add_argument('ds_path', metavar='PATH', type=str,
                         help='path to dataset')
     args = parser.parse_args()
@@ -39,6 +41,7 @@ if __name__ == '__main__':
     sequence_length = args.sequence_length
     embedding_dim = args.embedding_dim
     epochs = args.epochs
+    dropout = 0.3
     seed = 42
     val_split = 0.2
     ds_path = os.path.abspath(args.ds_path)
@@ -46,13 +49,6 @@ if __name__ == '__main__':
 
     loss_f = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
     metrics = [tf.metrics.SparseCategoricalAccuracy()]
-
-    model = tf.keras.Sequential([
-        layers.Embedding(max_features + 1, embedding_dim),
-        layers.Dropout(0.3),
-        layers.GlobalAveragePooling1D(),
-        layers.Dropout(0.3),
-        layers.Dense(40)])
 
     lr_schedule = tf.keras.optimizers.schedules.InverseTimeDecay(
       0.001,
@@ -95,6 +91,13 @@ if __name__ == '__main__':
     train_text = raw_train_ds.map(lambda x, y: x)
     vectorize_layer.adapt(train_text)
 
+    model = tf.keras.Sequential([
+        layers.Embedding(max_features + 1, embedding_dim),
+        layers.Dropout(dropout),
+        layers.GlobalAveragePooling1D(),
+        layers.Dropout(dropout),
+        layers.Dense(len(raw_train_ds.class_names))])
+
     if logging:
         callbacks.append(tf.keras.callbacks.TensorBoard(log_dir="logs"))
         try:
@@ -124,8 +127,14 @@ if __name__ == '__main__':
     export_model.compile(get_optimizer(), loss_f, metrics)
     # Input shape is determined from calling .predict()
     export_model.predict(['лингвистика'])
-    export_model.save('export_model')
-    with open('export_model/class_names.txt', 'w') as f:
+    export_model.save_weights('weights')
+
+    with open('weights/params.txt', 'w') as f:
+        f.write(f'{max_features}\n')
+        f.write(f'{sequence_length}\n')
+        f.write(f'{embedding_dim}\n')
+
+    with open('weights/class_names.txt', 'w') as f:
         for label in raw_train_ds.class_names:
             f.write(f'{label}\n')
 
