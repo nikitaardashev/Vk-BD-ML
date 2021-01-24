@@ -2,6 +2,7 @@ import os
 from tensorflow.keras import Sequential, layers, models
 from tensorflow.keras.layers.experimental.preprocessing import (
         TextVectorization)
+import numpy as np
 
 
 class Predictor:
@@ -9,7 +10,7 @@ class Predictor:
         self.model = None
         self.class_names = []
 
-        with open(os.path.join(model_path, 'class_names.txt'), 'r') as f:
+        with open(os.path.join(model_path, 'class_names.txt'), 'r', encoding='utf-8') as f:
             for line in f.readlines():
                 self.class_names.append(line.rstrip())
 
@@ -19,8 +20,8 @@ class Predictor:
         """return list of class predictions based on list of strings"""
         if isinstance(text_list, str):
             text_list = [text_list]
-        return [self.class_names[list(pr).index(max(pr))]
-                for pr in self.model.predict(text_list)]
+        prediction_result = self.model.predict(text_list)
+        return [[self.class_names[i] for i in row[:3]] for row in np.argsort(prediction_result)[::, ::-1]]
 
     def load_model(self, model_path):
         ckpt = os.path.join(model_path, 'checkpoint')
@@ -57,5 +58,5 @@ if __name__ == '__main__':
     p1 = Predictor('weights')
     print(p1.predict(['лингвистика', 'олег', 'физика', 'программирование']))
 
-    p2 = Predictor('export_model')
-    print(p2.predict(['лингвистика', 'олег', 'физика', 'программирование']))
+    #p2 = Predictor('export_model')
+    #print(p2.predict(['лингвистика', 'олег', 'физика', 'программирование']))
