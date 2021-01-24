@@ -5,6 +5,8 @@ if __name__ == '__main__':
 
 import json
 from typing import List, Union, Dict
+from operator import itemgetter
+from sqlalchemy import or_
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
@@ -13,6 +15,7 @@ from vk_api.utils import get_random_id
 from model.predictor import Predictor
 from database import db_session
 from database.models.UserStatuses import UserStatuses
+from database.models.GroupsIds import GroupsIds
 
 
 class Bot:
@@ -22,6 +25,7 @@ class Bot:
         self.service_token = ''  # сервисный ключ доступа (из приложения)
         self.app_id = 0  # ID приложения
         self.client_secret = ''  # защищённый ключ (из приложения)
+        self.predictor = Predictor('model\\weights')
         self.database_session = db_session.create_session()
         self.group_session = vk_api.VkApi(token=self.group_token,
                                           api_version='5.126')
@@ -46,7 +50,7 @@ class Bot:
                                      random_id=get_random_id(),
                                      message=message,
                                      keyboard=keyboard)
-        print(f'message {message[:15]}{"..." if len(message) > 15 else ""} to {user_id} has been sent')
+        print(f'message {message[:30]}{"..." if len(message) > 30 else ""} to {user_id} has been sent')
 
     def get_posts(self, owner_id: int, count: int = 1) -> Union[List[dict], dict]:
         """
@@ -59,7 +63,10 @@ class Bot:
         """
         posts = self.service_api.wall.get(owner_id=owner_id, count=count)
         print(f'group {owner_id} posts received')
-        return posts['items'] if len(posts['items']) > 1 else posts['items'][0]
+        try:
+            return posts['items'] if len(posts['items']) > 1 else posts['items'][0]
+        except IndexError:
+            print(f'error: {owner_id} {posts}')
 
     def get_subscriptions(self, user_id: int, extended: bool = False) -> List[int]:
         """
@@ -109,6 +116,12 @@ class Bot:
                                 payload=json.dumps({'button': 'start_analysis'}))
             message = 'Перед началом анализа, пожалуйста, откройте список ваших' \
                       ' групп для всех пользователей в настройках приватности.'
+            user = self.database_session.query(UserStatuses).filter(UserStatuses.user_id == from_id).first()
+            if user and user.subjects:
+                keyboard.add_button('Перейти к рекомендациям',
+                                    color=VkKeyboardColor.SECONDARY,
+                                    payload=json.dumps({'button': 'show_recommendation_1'}))
+                message += 'Вы уже выполнили анализ, поэтому вы можете сразу просмотреть свои рекомендации.'
             self.send_message(from_id, message, keyboard.get_keyboard())
             user_status = self.database_session.query(UserStatuses).filter(UserStatuses.user_id == from_id).first()
             if user_status:
@@ -116,9 +129,22 @@ class Bot:
             else:
                 self.database_session.add(UserStatuses(user_id=from_id, status='started'))
             self.database_session.commit()
-        elif 'button' in payload:
+        elif 'button' in payload and payload['button'] == 'start_analysis':
             message = 'Анализ начат. Пожалуйста, подождите.'
             self.send_message(from_id, message)
+
+            texts = []
+
+            groups_ids = self.get_subscriptions(from_id)
+            for _id in groups_ids:
+                try:
+                    posts = map(itemgetter('text'), filter(lambda x: not x['marked_as_ads'], self.get_posts(-_id, 10)))
+                    texts.append('\n'.join(posts))
+                except TypeError:
+                    continue
+
+            prediction = self.predictor.predict(texts)[0]
+
             # TODO:
             #  1. получить подписки пользователя методом get_subscriptions (обработать приватную страницу)
             #  2. получить n(?) постов с каждой, взять текст поста (одной строкой?)
@@ -126,20 +152,55 @@ class Bot:
             #  4. отправить сообщение с тремя(?) наиболее вероятными категориями
             #  5. показать первую страницу рекомендаций
 
-            message = '1. [Категория 1] - XX%\n2. [Категория 2] - XX%\n3. [Категория 3] - XX%'
+            user_status = self.database_session.query(UserStatuses).filter(UserStatuses.user_id == from_id).first()
+            user_status.subjects = '&'.join(prediction)
+            user_status.status = 'show_page'
+            user_status.page = 1
+            self.database_session.commit()
+
+            message = '\n'.join([f'{i}. {category}' for i, category in enumerate(prediction, 1)])
+
             self.send_message(from_id, message)
-            groups_ids = [338, 376, 817]
-            groups_names = [self.get_group_info(_id)['name'] for _id in groups_ids]
-            message = '\n'.join([f'{i + 1}. {groups_names[i]} -- https://vk.com/club{groups_ids[i]}'
-                                 for i in range(len(groups_ids))])
+            groups_ids = self.database_session.query(GroupsIds).filter(or_(GroupsIds.subject == prediction[0],
+                                                                           GroupsIds.subject == prediction[1],
+                                                                           GroupsIds.subject == prediction[2])).all()
+            show_groups = groups_ids[:10]
+            message = '\n'.join([f'{i + 1}. {show_groups[i].name} -- https://vk.com/club{show_groups[i].group_id}'
+                                 for i in range(len(show_groups))])
             keyboard = VkKeyboard(one_time=True)
             keyboard.add_button('Начать анализ повторно',
                                 color=VkKeyboardColor.SECONDARY,
                                 payload=json.dumps({'button': 'start_analysis'}))
             self.send_message(from_id, message, keyboard.get_keyboard())
+        elif 'button' in payload and 'show_recommendation' in payload['button']:
+            page = int(payload['button'].split('_')[2])
+            recommendation = self.database_session.query(UserStatuses).filter(UserStatuses.user_id == from_id).first()
+            recommendation = recommendation.subjects.split('&')
+            groups_ids = self.database_session.query(GroupsIds).filter(or_(
+                GroupsIds.subject == recommendation[0],
+                GroupsIds.subject == recommendation[1],
+                GroupsIds.subject == recommendation[2])).all()
+            show_groups = groups_ids[(page - 1) * 10:page * 10]
+            message = '\n'.join([f'{i + 1}. {show_groups[i].name} -- https://vk.com/club{show_groups[i].group_id}'
+                                 for i in range(len(show_groups))])
+            keyboard = VkKeyboard(one_time=True)
+            keyboard.add_button('Начать анализ повторно',
+                                color=VkKeyboardColor.SECONDARY,
+                                payload=json.dumps({'button': 'start_analysis'}))
+            keyboard.add_line()
+            if len(groups_ids) > 10:
+                page_number = page - 1 if page > 1 else len(groups_ids) // 10 + 1
+                keyboard.add_button(f'Страница {page_number}',
+                                    color=VkKeyboardColor.PRIMARY,
+                                    payload=json.dumps({'button': f'show_recommendation_{page_number}'}))
+                page_number = (page + 1) % len(groups_ids) + 1
+                keyboard.add_button(f'Страница {page_number}',
+                                    color=VkKeyboardColor.PRIMARY,
+                                    payload=json.dumps({'button': f'show_recommendation_{page_number}'}))
+            self.send_message(from_id, message, keyboard.get_keyboard())
             user_status = self.database_session.query(UserStatuses).filter(UserStatuses.user_id == from_id).first()
             user_status.status = 'show_page'
-            user_status.page = 1
+            user_status.page = page
             self.database_session.commit()
 
 

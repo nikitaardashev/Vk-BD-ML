@@ -4,6 +4,7 @@ import pymorphy2
 from tensorflow.keras import Sequential, layers
 from tensorflow.keras.layers.experimental.preprocessing import (
         TextVectorization)
+import numpy as np
 
 
 class Predictor:
@@ -11,9 +12,7 @@ class Predictor:
         with open(os.path.join(model_path, 'class_names.txt'),
                   'r', encoding='utf-8') as f:
             self.class_names = [line.rstrip() for line in f.readlines()]
-
         self.ma = pymorphy2.MorphAnalyzer()
-
         self.model = None
         self.load_model(model_path)
 
@@ -30,14 +29,13 @@ class Predictor:
 
     def predict(self, text_list):
         """return list of class predictions based on list of strings"""
-        if isinstance(text_list, str):
-            text_list = [text_list]
         if not text_list or text_list == ['']:
             return None
         text_list = [self.clean_text(text) for text in text_list]
-        return [self.class_names[list(pr).index(max(pr))]
-                for pr in self.model.predict(text_list)]
+        prediction_result = self.model.predict(text_list)
+        return [[self.class_names[i] for i in row[:3]] for row in np.argsort(prediction_result)[::, ::-1]]
 
+  
     def load_model(self, model_path):
         try:
             with open(os.path.join(model_path, 'params.txt'), 'r') as f:
@@ -64,6 +62,7 @@ class Predictor:
             layers.Dense(len(self.class_names), activation='sigmoid')])])
         self.model.load_weights(os.path.join(model_path, 'checkpoint'))
         self.model.predict(["define", "input", "shape"])
+
 
 
 if __name__ == '__main__':
