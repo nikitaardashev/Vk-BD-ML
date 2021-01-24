@@ -1,4 +1,6 @@
 import os
+import re
+import pymorphy2
 from tensorflow.keras import Sequential, layers, models
 from tensorflow.keras.layers.experimental.preprocessing import (
         TextVectorization)
@@ -6,19 +8,33 @@ from tensorflow.keras.layers.experimental.preprocessing import (
 
 class Predictor:
     def __init__(self, model_path):
+        with open(os.path.join(model_path, 'class_names.txt'),
+                  'r', encoding='utf-8') as f:
+            self.class_names = [line.rstrip() for line in f.readlines()]
+
+        self.ma = pymorphy2.MorphAnalyzer()
+
         self.model = None
-        self.class_names = []
-
-        with open(os.path.join(model_path, 'class_names.txt'), 'r') as f:
-            for line in f.readlines():
-                self.class_names.append(line.rstrip())
-
         self.load_model(model_path)
+
+    def clean_text(self, text):
+        text = text.replace('\\', ' ').replace('╚', ' ').replace('╩', ' ')
+        text = text.lower()
+        text = re.sub(r'http\S+', '', text)
+        text = re.sub(r'[^\w\s]', ' ', text)
+        text = ' '.join(self.ma.parse(word)[0].normal_form
+                        for word in text.split())
+        text = ' '.join(word for word in text.split() if len(word) > 3)
+
+        return text
 
     def predict(self, text_list):
         """return list of class predictions based on list of strings"""
         if isinstance(text_list, str):
             text_list = [text_list]
+        if not text_list or text_list == ['']:
+            return None
+        text_list = [self.clean_text(text) for text in text_list]
         return [self.class_names[list(pr).index(max(pr))]
                 for pr in self.model.predict(text_list)]
 
@@ -51,11 +67,12 @@ class Predictor:
             self.model.load_weights(ckpt)
         else:
             self.model = models.load_model(model_path)
+        self.model.predict(["define input shape"])
 
 
 if __name__ == '__main__':
     p1 = Predictor('weights')
-    print(p1.predict(['лингвистика', 'олег', 'физика', 'программирование']))
+    print(p1.predict(['лингвистика', 'олег', 'фИзика', 'программирование']))
 
     p2 = Predictor('export_model')
     print(p2.predict(['лингвистика', 'олег', 'физика', 'программирование']))
