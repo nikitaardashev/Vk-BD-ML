@@ -1,9 +1,8 @@
 import os
-import re
-import pymorphy2
 from tensorflow.keras import Sequential, layers
 from tensorflow.keras.layers.experimental.preprocessing import (
         TextVectorization)
+from utils.cleaner import Cleaner
 import numpy as np
 
 
@@ -12,30 +11,20 @@ class Predictor:
         with open(os.path.join(model_path, 'class_names.txt'),
                   'r', encoding='utf-8') as f:
             self.class_names = [line.rstrip() for line in f.readlines()]
-        self.ma = pymorphy2.MorphAnalyzer()
+
+        self.cleaner = Cleaner()
+
         self.model = None
         self.load_model(model_path)
-
-    def clean_text(self, text):
-        text = text.replace('\\', ' ').replace('╚', ' ').replace('╩', ' ')
-        text = text.lower()
-        text = re.sub(r'http\S+', '', text)
-        text = re.sub(r'[^\w\s]', ' ', text)
-        text = ' '.join(self.ma.parse(word)[0].normal_form
-                        for word in text.split())
-        text = ' '.join(word for word in text.split() if len(word) > 3)
-
-        return text
 
     def predict(self, text_list):
         """return list of class predictions based on list of strings"""
         if not text_list or text_list == ['']:
             return None
-        text_list = [self.clean_text(text) for text in text_list]
+        text_list = [self.cleaner.clean_text(text) for text in text_list]
         prediction_result = self.model.predict(text_list)
         return [[self.class_names[i] for i in row[:3]] for row in np.argsort(prediction_result)[::, ::-1]]
 
-  
     def load_model(self, model_path):
         try:
             with open(os.path.join(model_path, 'params.txt'), 'r') as f:
@@ -62,7 +51,6 @@ class Predictor:
             layers.Dense(len(self.class_names), activation='sigmoid')])])
         self.model.load_weights(os.path.join(model_path, 'checkpoint'))
         self.model.predict(["define", "input", "shape"])
-
 
 
 if __name__ == '__main__':
