@@ -1,9 +1,10 @@
 import os
+from operator import itemgetter
 from tensorflow.keras import Sequential, layers
-from tensorflow.keras.layers.experimental.preprocessing import (
-        TextVectorization)
+from tensorflow.keras.layers.experimental.preprocessing import\
+    TextVectorization
+
 from utils.cleaner import Cleaner
-import numpy as np
 
 
 class Predictor:
@@ -23,7 +24,9 @@ class Predictor:
             return None
         text_list = [self.cleaner.clean_text(text) for text in text_list]
         prediction_result = self.model.predict(text_list)
-        return [[self.class_names[i] for i in row[:3]] for row in np.argsort(prediction_result)[::, ::-1]]
+        probabilities = [(key, sum(map(itemgetter(i), prediction_result)))
+                         for i, key in enumerate(self.class_names)]
+        return sorted(probabilities, key=itemgetter(1), reverse=True)
 
     def load_model(self, model_path):
         try:
@@ -48,7 +51,7 @@ class Predictor:
             layers.Dropout(0.3),
             layers.GlobalAveragePooling1D(),
             layers.Dropout(0.3),
-            layers.Dense(len(self.class_names), activation='sigmoid')])])
+            layers.Dense(len(self.class_names))])])
         self.model.load_weights(os.path.join(model_path, 'checkpoint'))
         self.model.predict(["define", "input", "shape"])
 
