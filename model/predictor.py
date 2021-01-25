@@ -10,7 +10,7 @@ class Predictor:
     def __init__(self, model_path):
         with open(os.path.join(model_path, 'class_names.txt'),
                   'r', encoding='utf-8') as f:
-            self.class_names = [line.rstrip() for line in f.readlines()]
+            self.class_names = f.readline().rstrip().split(',')
 
         self.cleaner = Cleaner()
 
@@ -23,7 +23,8 @@ class Predictor:
             return None
         text_list = [self.cleaner.clean_text(text) for text in text_list]
         prediction_result = self.model.predict(text_list)
-        return [[self.class_names[i] for i in row[:3]] for row in np.argsort(prediction_result)[::, ::-1]]
+        return [[self.class_names[i] for i in row[:3]]
+                for row in np.argsort(prediction_result)[::, ::-1]]
 
     def load_model(self, model_path):
         try:

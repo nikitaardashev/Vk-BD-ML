@@ -28,8 +28,7 @@ if __name__ == '__main__':
                         dest='epochs', default=10, type=int)
     parser.add_argument('-d', '--dropout', metavar="N",
                         dest='epochs', default=0.3, type=int)
-    parser.add_argument('ds_path', metavar='PATH', type=str,
-                        help='path to dataset')
+    parser.add_argument('--data_dir', metavar='PATH', default='data', type=str)
     args = parser.parse_args()
     print(args)
 
@@ -44,22 +43,11 @@ if __name__ == '__main__':
     dropout = 0.3
     seed = 42
     val_split = 0.2
-    ds_path = os.path.abspath(args.ds_path)
+    data_dir = args.data_dir
     callbacks = [tf.keras.callbacks.EarlyStopping(patience=5)]
 
     loss_f = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
     metrics = [tf.metrics.SparseCategoricalAccuracy()]
-
-    lr_schedule = tf.keras.optimizers.schedules.InverseTimeDecay(
-      0.001,
-      decay_steps=int(555372*(1-val_split)/batch_size)*1000,
-      decay_rate=1,
-      staircase=False)
-
-
-    def get_optimizer():
-        return tf.keras.optimizers.Adam(lr_schedule)
-
 
     vectorize_layer = TextVectorization(
         max_tokens=max_features,
@@ -67,25 +55,45 @@ if __name__ == '__main__':
         output_sequence_length=sequence_length)
 
 
-    def vectorize_text(text, label):
+    def vectorize_text(text, cat):
         text = tf.expand_dims(text, -1)
-        return vectorize_layer(text), label
+        return vectorize_layer(text), cat
 
 
-    print(f'Loading dataset from "{ds_path}" ...')
-    raw_train_ds = preprocessing.text_dataset_from_directory(
-        os.path.join(ds_path, 'train'),
-        batch_size=batch_size,
-        validation_split=val_split,
-        subset='training',
-        seed=seed)
-    raw_val_ds = preprocessing.text_dataset_from_directory(
-        os.path.join(ds_path, 'train'),
-        batch_size=batch_size,
-        validation_split=val_split,
-        subset='validation',
-        seed=seed)
+    print(f'Loading dataset from "{os.path.abspath(data_dir)}" ...')
+
+    # Load a csv dataset
+    with open(os.path.join(data_dir, 'ds_info.txt'),
+              encoding='utf-8') as f:
+        class_names = f.readline().rstrip().split(',')
+        ds_len = int(f.readline())
+
+    ds = tf.data.experimental.CsvDataset(os.path.join(data_dir, 'dataset.csv'),
+                                         [str(), int()])
+
+    # ds_len = ds.reduce(int(), lambda x, _: x + 1).numpy()
+    train_ds_len = int(ds_len * (1 - val_split))
+
+    raw_train_ds = ds.take(train_ds_len).batch(batch_size)
+    raw_val_ds = ds.skip(ds_len - train_ds_len).batch(batch_size)
     raw_test_ds = raw_val_ds
+
+    # #  Load dataset like in tutorial
+    # raw_train_ds = preprocessing.text_dataset_from_directory(
+    #     os.path.join(data_dir, 'train'),
+    #     batch_size=batch_size,
+    #     validation_split=val_split,
+    #     subset='training',
+    #     seed=seed)
+    # train_ds_len = raw_train_ds.cardinality().numpy() * batch_size
+    # class_names = raw_train_ds.class_names
+    # raw_val_ds = preprocessing.text_dataset_from_directory(
+    #     os.path.join(data_dir, 'train'),
+    #     batch_size=batch_size,
+    #     validation_split=val_split,
+    #     subset='validation',
+    #     seed=seed)
+    # raw_test_ds = raw_val_ds
 
     print("Performing adapt ...")
     train_text = raw_train_ds.map(lambda x, y: x)
@@ -96,12 +104,23 @@ if __name__ == '__main__':
         layers.Dropout(dropout),
         layers.GlobalAveragePooling1D(),
         layers.Dropout(dropout),
-        layers.Dense(len(raw_train_ds.class_names))])
+        layers.Dense(len(class_names))])
+
+    lr_schedule = tf.keras.optimizers.schedules.InverseTimeDecay(
+        0.001,
+        decay_steps=int(train_ds_len / batch_size) * 1000,
+        decay_rate=1,
+        staircase=False)
+
+
+    def get_optimizer():
+        return tf.keras.optimizers.Adam(lr_schedule)
+
 
     if logging:
-        callbacks.append(tf.keras.callbacks.TensorBoard(log_dir="logs"))
+        callbacks.append(tf.keras.callbacks.TensorBoard(log_dir="data/logs"))
         try:
-            shutil.rmtree('logs')
+            shutil.rmtree('data/logs')
         except FileNotFoundError:
             pass
 
@@ -127,16 +146,15 @@ if __name__ == '__main__':
     export_model.compile(get_optimizer(), loss_f, metrics)
     # Input shape is determined from calling .predict()
     export_model.predict(['лингвистика'])
-    export_model.save_weights('weights')
+    export_model.save_weights('model/weights/checkpoint')
 
-    with open('weights/params.txt', 'w') as f:
+    with open('model/weights/params.txt', 'w') as f:
         f.write(f'{max_features}\n')
         f.write(f'{sequence_length}\n')
         f.write(f'{embedding_dim}\n')
 
-    with open('weights/class_names.txt', 'w') as f:
-        for label in raw_train_ds.class_names:
-            f.write(f'{label}\n')
+    with open('model/weights/class_names.txt', 'w') as f:
+        f.write(f"{','.join(class_names)}\n")
 
     if logging:
         with open('stat.txt', 'a') as f:
@@ -154,15 +172,15 @@ if __name__ == '__main__':
     # Export embedding data for visualisation
     if export_embedding:
         try:
-            shutil.rmtree('embedding')
+            shutil.rmtree('data/embedding')
         except FileNotFoundError:
             pass
-        os.mkdir('embedding')
+        os.mkdir('data/embedding')
 
         weights = model.get_layer('embedding').get_weights()[0]
         vocab = vectorize_layer.get_vocabulary()
-        out_v = io.open('embedding/vectors.tsv', 'w', encoding='utf-8')
-        out_m = io.open('embedding/metadata.tsv', 'w', encoding='utf-8')
+        out_v = io.open('data/embedding/vectors.tsv', 'w', encoding='utf-8')
+        out_m = io.open('data/embedding/metadata.tsv', 'w', encoding='utf-8')
         for index, word in enumerate(vocab):
             if index == 0:
                 continue  # skip 0, it's padding.
