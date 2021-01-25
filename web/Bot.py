@@ -21,11 +21,11 @@ from database.models.GroupsIds import GroupsIds
 
 class Bot:
     def __init__(self):
-        self.group_token = 'e4b7cb9eb5b4c0eece82e913aca433e9daaf5cffc58d7e1fcbbcce0882c22352a3fb40bc1a04cb777e185'  # ключ доступа группы
-        self.group_id = 197912939  # ID группы
-        self.service_token = '5c0ff5695c0ff5695c0ff569145c7b34f055c0f5c0ff56903ac3c08de3d59cf69e6645b'  # сервисный ключ доступа (из приложения)
-        self.app_id = 7651737  # ID приложения
-        self.client_secret = 'yeRqPtdVKHU4bEJug1aX'  # защищённый ключ (из приложения)
+        self.group_token = ''  # ключ доступа группы
+        self.group_id = 0  # ID группы
+        self.service_token = ''  # сервисный ключ доступа (из приложения)
+        self.app_id = 0  # ID приложения
+        self.client_secret = ''  # защищённый ключ (из приложения)
         self.predictor = Predictor('model\\weights')
         self.database_session = db_session.create_session()
         self.group_session = vk_api.VkApi(token=self.group_token,
