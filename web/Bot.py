@@ -8,7 +8,7 @@ from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from vk_api.utils import get_random_id
 
-# from model.predictor import Predictor
+from model.predictor import Predictor
 from database import db_session
 from database.models.UserStatuses import UserStatuses
 from database.models.GroupsIds import GroupsIds
@@ -22,7 +22,7 @@ class Bot:
         app_id = int(os.environ['APP_ID'])
         client_secret = os.environ['CLIENT_SECRET']
 
-        # self.predictor = Predictor(os.path.join('model', 'weights'))
+        self.predictor = Predictor(os.path.join('model', 'weights'))
         self.database_session = db_session.create_session()
         self.group_session = vk_api.VkApi(token=group_token,
                                           api_version='5.126')
