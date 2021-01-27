@@ -1,4 +1,4 @@
-# from web import Bot
+from web import Bot
 # from database import db_session
 
 
