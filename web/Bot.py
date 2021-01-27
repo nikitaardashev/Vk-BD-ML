@@ -22,11 +22,11 @@ from database.models.GroupsIds import GroupsIds
 
 class Bot:
     def __init__(self):
-        group_token = os.environ.get('GROUP_TOKEN')
-        group_id = int(os.environ.get('GROUP_ID'))
-        service_token = os.environ.get('SERVICE_TOKEN')
-        app_id = int(os.environ.get('APP_ID'))
-        client_secret = os.environ.get('CLIENT_SECRET')
+        group_token = os.environ['GROUP_TOKEN']
+        group_id = int(os.environ['GROUP_ID'])
+        service_token = os.environ['SERVICE_TOKEN']
+        app_id = int(os.environ['APP_ID'])
+        client_secret = os.environ['CLIENT_SECRET']
 
         self.predictor = Predictor(os.path.join('model', 'weights'))
         self.database_session = db_session.create_session()
