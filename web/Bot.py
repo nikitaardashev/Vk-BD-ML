@@ -1,9 +1,10 @@
-if __name__ == '__main__':
-    # Search imports in parent directory (for model.predictor)
-    import sys
+# if __name__ == '__main__':
+#     # Search imports in parent directory (for model.predictor)
+#     import sys
+#
+#     sys.path.insert(0, '..')
 
-    sys.path.insert(0, '..')
-
+import sys
 import os
 import json
 from typing import List, Union, Dict
@@ -22,11 +23,15 @@ from database.models.GroupsIds import GroupsIds
 
 class Bot:
     def __init__(self):
-        group_token = os.environ['GROUP_TOKEN']
-        group_id = int(os.environ['GROUP_ID'])
-        service_token = os.environ['SERVICE_TOKEN']
-        app_id = int(os.environ['APP_ID'])
-        client_secret = os.environ['CLIENT_SECRET']
+        try:
+            group_token = os.environ['GROUP_TOKEN']
+            group_id = int(os.environ['GROUP_ID'])
+            service_token = os.environ['SERVICE_TOKEN']
+            app_id = int(os.environ['APP_ID'])
+            client_secret = os.environ['CLIENT_SECRET']
+        except BaseException as e:
+            print(e)
+            sys.stdout.flush()
 
         self.predictor = Predictor(os.path.join('model', 'weights'))
         self.database_session = db_session.create_session()
