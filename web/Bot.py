@@ -23,15 +23,11 @@ from database.models.GroupsIds import GroupsIds
 
 class Bot:
     def __init__(self):
-        try:
-            group_token = os.environ['GROUP_TOKEN']
-            group_id = int(os.environ['GROUP_ID'])
-            service_token = os.environ['SERVICE_TOKEN']
-            app_id = int(os.environ['APP_ID'])
-            client_secret = os.environ['CLIENT_SECRET']
-        except BaseException as e:
-            print(e)
-            sys.stdout.flush()
+        group_token = os.environ['GROUP_TOKEN']
+        group_id = int(os.environ['GROUP_ID'])
+        service_token = os.environ['SERVICE_TOKEN']
+        app_id = int(os.environ['APP_ID'])
+        client_secret = os.environ['CLIENT_SECRET']
 
         self.predictor = Predictor(os.path.join('model', 'weights'))
         self.database_session = db_session.create_session()
