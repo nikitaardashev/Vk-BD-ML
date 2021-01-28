@@ -128,15 +128,15 @@ class Bot:
         else:
             payload = {'command': 'start'}
 
-        if 'command' in payload and payload['command'] == 'start':
+        if payload.get('command') == 'start':
             keyboard = VkKeyboard(one_time=True)
             keyboard.add_button('Начать анализ',
                                 color=VkKeyboardColor.POSITIVE,
                                 payload=json.dumps({'button':
                                                         'start_analysis'}))
-            message = 'Перед началом анализа, пожалуйста, откройте список' \
-                      ' ваших групп для всех пользователей в настройках' \
-                      ' приватности.'
+            message = ('Здравствуйте, я - бот. Я помогу вам определить ваши '
+                       'интересы и подскажу, где найти ещё больше полезных '
+                       'групп ВКонтакте. Начнём анализ?')
             user = self.database_session.query(UserStatuses).filter(
                 UserStatuses.user_id == from_id).first()
             if user and user.subjects:
@@ -144,8 +144,8 @@ class Bot:
                                     color=VkKeyboardColor.SECONDARY,
                                     payload=json.dumps(
                                         {'button': 'show_recommendation_1'}))
-                message += '\nВы уже выполнили анализ, поэтому вы можете ' \
-                           'сразу просмотреть свои рекомендации. '
+                message = ('С возвращением! Желаете провести анализ снова или '
+                           'посмотреть, что я рекомендовал вам в прошлый раз?')
             self.send_message(from_id, message, keyboard.get_keyboard())
             user_status = self.database_session.query(UserStatuses).filter(
                 UserStatuses.user_id == from_id).first()
@@ -155,8 +155,9 @@ class Bot:
                 self.database_session.add(
                     UserStatuses(user_id=from_id, status='started'))
             self.database_session.commit()
-        elif 'button' in payload and payload['button'] == 'start_analysis':
-            message = 'Анализ начат. Пожалуйста, подождите.'
+        elif payload.get('button') == 'start_analysis':
+            message = ('Анализ может занять несколько минут. Пожалуйста, '
+                       'подождите.')
             self.send_message(from_id, message)
 
             texts = []
@@ -220,8 +221,8 @@ class Bot:
                                         f'show_recommendation_2'
                                 }))
             self.send_message(from_id, message, keyboard.get_keyboard())
-        elif 'button' in payload and \
-                'show_recommendation' in payload['button']:
+        elif ('button' in payload and
+              'show_recommendation' in payload['button']):
             page = int(payload['button'].split('_')[2])
             recommendation = self.database_session.query(UserStatuses).filter(
                 UserStatuses.user_id == from_id).first()
