@@ -12,6 +12,7 @@ from model.predictor import Predictor
 from database import db_session
 from database.models.UserStatuses import UserStatuses
 from database.models.GroupsIds import GroupsIds
+from database.models.Groups import Groups
 
 
 class Bot:
@@ -21,6 +22,9 @@ class Bot:
         service_token = os.environ['SERVICE_TOKEN']
         app_id = int(os.environ['APP_ID'])
         client_secret = os.environ['CLIENT_SECRET']
+
+        self.admin_pwd = os.environ['ADMIN_PWD']
+        self.new_cats = sorted(['физика', 'математика'])
 
         self.predictor = Predictor(os.path.join('model', 'weights'))
         self.database_session = db_session.create_session()
@@ -32,6 +36,14 @@ class Bot:
         self.long_poll = VkBotLongPoll(self.group_session, group_id)
         self.group_api = self.group_session.get_api()
         self.service_api = self.service_session.get_api()
+
+        # For dataset filtering
+        self.latest_id = self.database_session.query(Groups.group_id).order_by(
+            Groups.group_id.desc()).first()
+        if self.latest_id is None:
+            self.latest_id = 0
+        else:
+            self.latest_id = self.latest_id[0]
 
     def send_message(self,
                      user_id: int,
@@ -92,10 +104,9 @@ class Bot:
               f'{"user" if user_id > 0 else "group"} {abs(user_id)}')
         return subscriptions['groups']['items']
 
-    def get_group_info(self,
-                       group_id: int) -> \
-            Union[Dict[str, Union[str, int]],
-                  List[Dict[str, Union[str, int]]]]:
+    def get_group_info(self, group_id: int) -> Union[
+        Dict[str, Union[str, int]], List[Dict[str, Union[str, int]]]
+    ]:
         """
         gets information about one or more groups using method groups.getById
         (https://vk.com/dev/groups.getById)
@@ -122,150 +133,233 @@ class Bot:
 
     def process_new_message(self, event):
         from_id = event.object['message']['from_id']
+        cmd = event.object['message']['text']
+        print(f'{from_id} sent {cmd}')
 
-        if 'payload' in event.object['message']:
-            payload = json.loads(event.object['message']['payload'])
+        payload = json.loads(event.object['message'].get('payload', '{}'))
+
+        if payload.get('button') == 'start_analysis':
+            self.command_start_analysis(from_id)
+        elif ('button' in payload and
+              'show_recommendation' in payload['button']):
+            self.command_show_recommendation(from_id, payload)
+        elif ''.join(filter(str.isalpha, cmd.lower())) == self.admin_pwd:
+            self.command_admin(from_id)
+        elif ('button' in payload and
+              'dataset_filter' in payload['button']):
+            self.command_dataset_filter(from_id, payload)
         else:
-            payload = {'command': 'start'}
+            self.command_start(from_id)
 
-        if payload.get('command') == 'start':
+    def command_start(self, from_id):
+        keyboard = VkKeyboard(one_time=True)
+        keyboard.add_button('Начать анализ',
+                            color=VkKeyboardColor.POSITIVE,
+                            payload=json.dumps({'button': 'start_analysis'}))
+        msg = ('Здравствуйте, я - бот. Я помогу вам определить ваши '
+               'интересы и подскажу, где найти ещё больше полезных '
+               'групп ВКонтакте. Начнём анализ?')
+        user = self.database_session.query(UserStatuses).filter(
+            UserStatuses.user_id == from_id).first()
+        if user and user.subjects:
+            keyboard.add_button('Перейти к рекомендациям',
+                                color=VkKeyboardColor.SECONDARY,
+                                payload=json.dumps(
+                                    {'button': 'show_recommendation_1'}))
+            msg = ('С возвращением! Желаете провести анализ снова или '
+                   'посмотреть, что я рекомендовал вам в прошлый раз?')
+        self.send_message(from_id, msg, keyboard.get_keyboard())
+        user_status = self.database_session.query(UserStatuses).filter(
+            UserStatuses.user_id == from_id).first()
+        if user_status:
+            user_status.status = 'started'
+        else:
+            self.database_session.add(
+                UserStatuses(user_id=from_id, status='started'))
+            print(f'user {from_id} added')
+        self.database_session.commit()
+
+    def command_start_analysis(self, from_id):
+        message = ('Анализ может занять несколько минут. Пожалуйста, '
+                   'подождите.')
+        self.send_message(from_id, message)
+
+        texts = []
+
+        groups_ids = self.get_subscriptions(from_id)
+        for _id in groups_ids:
+            try:
+                posts = map(itemgetter('text'),
+                            filter(lambda x: not x['marked_as_ads'],
+                                   self.get_posts(-_id, 10)))
+                texts.append('\n'.join(posts))
+            except TypeError:
+                continue
+
+        prediction = list(map(itemgetter(0),
+                              self.predictor.predict(texts)[:3]))
+
+        user_status = self.database_session.query(UserStatuses).filter(
+            UserStatuses.user_id == from_id).first()
+        user_status.subjects = '&'.join(prediction)
+        user_status.status = 'show_page'
+        user_status.page = 1
+        self.database_session.commit()
+
+        message = 'В ходе анализа было выявлено, что вас ' \
+                  'интересуют следующие категории групп:\n'
+        message += '\n'.join([f'{i}. {category.capitalize()}'
+                              for i, category in enumerate(prediction, 1)])
+
+        self.send_message(from_id, message)
+        groups_ids = self.database_session.query(GroupsIds).filter(
+            or_(GroupsIds.subject == prediction[0],
+                GroupsIds.subject == prediction[1],
+                GroupsIds.subject == prediction[2])
+        ).all()
+        show_groups = groups_ids[:10]
+        print(show_groups)
+        message = 'Страница 1:\n'
+        message += '\n'.join([
+            f'{i + 1}. {show_groups[i].name} -- '
+            f'https://vk.com/club{show_groups[i].group_id} '
+            for i in range(len(show_groups))
+        ])
+        keyboard = VkKeyboard(one_time=True)
+        keyboard.add_button('Начать анализ повторно',
+                            color=VkKeyboardColor.SECONDARY,
+                            payload=json.dumps(
+                                {'button': 'start_analysis'}))
+        keyboard.add_line()
+        page_number = len(groups_ids) // 10 + 1
+        keyboard.add_button(f'Страница {page_number}',
+                            color=VkKeyboardColor.PRIMARY,
+                            payload=json.dumps({
+                                'button':
+                                    f'show_recommendation_{page_number}'
+                            }))
+        keyboard.add_button(f'Страница 2',
+                            color=VkKeyboardColor.PRIMARY,
+                            payload=json.dumps({
+                                'button':
+                                    f'show_recommendation_2'
+                            }))
+        self.send_message(from_id, message, keyboard.get_keyboard())
+
+    def command_show_recommendation(self, from_id, payload):
+        page = int(payload['button'].split('_')[2])
+        recommendation = self.database_session.query(UserStatuses).filter(
+            UserStatuses.user_id == from_id).first()
+        recommendation = recommendation.subjects.split('&')
+        groups_ids = self.database_session.query(GroupsIds).filter(or_(
+            GroupsIds.subject == recommendation[0],
+            GroupsIds.subject == recommendation[1],
+            GroupsIds.subject == recommendation[2])).all()
+        show_groups = groups_ids[(page - 1) * 10:page * 10]
+        message = f'Страница {page}:\n'
+        message += '\n'.join([
+            f'{i + 1}. {show_groups[i].name} -- '
+            f'https://vk.com/club{show_groups[i].group_id}'
+            for i in range(len(show_groups))
+        ])
+        keyboard = VkKeyboard(one_time=True)
+        keyboard.add_button('Начать анализ повторно',
+                            color=VkKeyboardColor.SECONDARY,
+                            payload=json.dumps(
+                                {'button': 'start_analysis'}))
+        keyboard.add_line()
+        page_number = page - 1 if page > 1 else len(
+            groups_ids) // 10 + 1
+        keyboard.add_button(f'Страница {page_number}',
+                            color=VkKeyboardColor.PRIMARY,
+                            payload=json.dumps({
+                                'button':
+                                    f'show_recommendation_{page_number}'
+                            }))
+        page_number = (page + 1) % (len(groups_ids) // 10 + 1)
+        page_number = page_number or len(groups_ids) // 10 + 1
+        keyboard.add_button(f'Страница {page_number}',
+                            color=VkKeyboardColor.PRIMARY,
+                            payload=json.dumps({
+                                'button':
+                                    f'show_recommendation_{page_number}'
+                            }))
+        self.send_message(from_id, message, keyboard.get_keyboard())
+        user_status = self.database_session.query(UserStatuses).filter(
+            UserStatuses.user_id == from_id).first()
+        user_status.status = 'show_page'
+        user_status.page = page
+        self.database_session.commit()
+
+    def command_admin(self, from_id):
+        print(f'{from_id} entered admin panel')
+
+        keyboard = VkKeyboard(one_time=True)
+        keyboard.add_button('Фильтровать датасет',
+                            color=VkKeyboardColor.PRIMARY,
+                            payload=json.dumps({'button': 'dataset_filter'}))
+        keyboard.add_button('Выйти',
+                            color=VkKeyboardColor.NEGATIVE,
+                            payload=json.dumps({'command': 'start'}))
+        msg = 'Вы вошли в панель администратора'
+        self.send_message(from_id, msg, keyboard.get_keyboard())
+
+        user_status = self.database_session.query(UserStatuses).filter(
+            UserStatuses.user_id == from_id).first()
+        if user_status:
+            user_status.status = 'admin'
+        else:
+            self.database_session.add(
+                UserStatuses(user_id=from_id, status='admin'))
+        self.database_session.commit()
+
+    def command_dataset_filter(self, from_id, payload):
+        user_status = self.database_session.query(UserStatuses).filter(
+            UserStatuses.user_id == from_id).first()
+        if user_status.status == 'admin':
+            if '#' in payload['button']:
+                _, gr_id, cat = payload['button'].split('#')
+                gr_id = int(gr_id)
+                if gr_id > self.latest_id:
+                    self.latest_id = gr_id
+                    old_group = self.database_session.query(
+                        GroupsIds).get(self.latest_id)
+                    self.database_session.add(Groups(group_id=self.latest_id,
+                                                     name=old_group.name,
+                                                     subject=cat,
+                                                     link=old_group.link))
+                    msg = (f"{old_group.name} теперь относится к группе "
+                           f"{cat.capitalize()}")
+                else:
+                    msg = f'Группа {gr_id} уже была добавлена'
+                self.send_message(from_id, msg)
+
+            group = self.database_session.query(GroupsIds).order_by(
+                GroupsIds.group_id.asc()
+            ).filter(GroupsIds.group_id > self.latest_id).first()
+
+            keyboard = VkKeyboard(one_time=True)
+            msg = ('К какой категории относится эта группа?\n'
+                   f'https://vk.com/club{group.group_id}\n\n')
+            for cat in self.new_cats:
+                keyboard.add_button(cat.capitalize(),
+                                    color=VkKeyboardColor.SECONDARY,
+                                    payload=json.dumps({'button': f'dataset_filter#{group.group_id}#{cat}'}))
+            keyboard.add_button('Ни к одной',
+                                color=VkKeyboardColor.NEGATIVE,
+                                payload=json.dumps({'button': f'dataset_filter#{group.group_id}#other'}))
+            keyboard.add_button('Завершить',
+                                color=VkKeyboardColor.NEGATIVE,
+                                payload=json.dumps({'command': 'start'}))
+            self.send_message(from_id, msg, keyboard.get_keyboard())
+        else:
             keyboard = VkKeyboard(one_time=True)
             keyboard.add_button('Начать анализ',
                                 color=VkKeyboardColor.POSITIVE,
-                                payload=json.dumps({'button':
-                                                        'start_analysis'}))
-            message = ('Здравствуйте, я - бот. Я помогу вам определить ваши '
-                       'интересы и подскажу, где найти ещё больше полезных '
-                       'групп ВКонтакте. Начнём анализ?')
-            user = self.database_session.query(UserStatuses).filter(
-                UserStatuses.user_id == from_id).first()
-            if user and user.subjects:
-                keyboard.add_button('Перейти к рекомендациям',
-                                    color=VkKeyboardColor.SECONDARY,
-                                    payload=json.dumps(
-                                        {'button': 'show_recommendation_1'}))
-                message = ('С возвращением! Желаете провести анализ снова или '
-                           'посмотреть, что я рекомендовал вам в прошлый раз?')
-            self.send_message(from_id, message, keyboard.get_keyboard())
-            user_status = self.database_session.query(UserStatuses).filter(
-                UserStatuses.user_id == from_id).first()
-            if user_status:
-                user_status.status = 'started'
-            else:
-                self.database_session.add(
-                    UserStatuses(user_id=from_id, status='started'))
-            self.database_session.commit()
-        elif payload.get('button') == 'start_analysis':
-            message = ('Анализ может занять несколько минут. Пожалуйста, '
-                       'подождите.')
-            self.send_message(from_id, message)
-
-            texts = []
-
-            groups_ids = self.get_subscriptions(from_id)
-            for _id in groups_ids:
-                try:
-                    posts = map(itemgetter('text'),
-                                filter(lambda x: not x['marked_as_ads'],
-                                       self.get_posts(-_id, 10)))
-                    texts.append('\n'.join(posts))
-                except TypeError:
-                    continue
-
-            prediction = list(map(itemgetter(0),
-                                  self.predictor.predict(texts)[:3]))
-
-            user_status = self.database_session.query(UserStatuses).filter(
-                UserStatuses.user_id == from_id).first()
-            user_status.subjects = '&'.join(prediction)
-            user_status.status = 'show_page'
-            user_status.page = 1
-            self.database_session.commit()
-
-            message = 'В ходе анализа было выявлено, что вас ' \
-                      'интересуют следующие категории групп:\n'
-            message += '\n'.join([f'{i}. {category.capitalize()}'
-                                  for i, category in enumerate(prediction, 1)])
-
-            self.send_message(from_id, message)
-            groups_ids = self.database_session.query(GroupsIds).filter(
-                or_(GroupsIds.subject == prediction[0],
-                    GroupsIds.subject == prediction[1],
-                    GroupsIds.subject == prediction[2])
-            ).all()
-            show_groups = groups_ids[:10]
-            print(show_groups)
-            message = 'Страница 1:\n'
-            message += '\n'.join([
-                f'{i + 1}. {show_groups[i].name} -- '
-                f'https://vk.com/club{show_groups[i].group_id} '
-                for i in range(len(show_groups))
-            ])
-            keyboard = VkKeyboard(one_time=True)
-            keyboard.add_button('Начать анализ повторно',
-                                color=VkKeyboardColor.SECONDARY,
                                 payload=json.dumps(
                                     {'button': 'start_analysis'}))
-            keyboard.add_line()
-            page_number = len(groups_ids) // 10 + 1
-            keyboard.add_button(f'Страница {page_number}',
-                                color=VkKeyboardColor.PRIMARY,
-                                payload=json.dumps({
-                                    'button':
-                                        f'show_recommendation_{page_number}'
-                                }))
-            keyboard.add_button(f'Страница 2',
-                                color=VkKeyboardColor.PRIMARY,
-                                payload=json.dumps({
-                                    'button':
-                                        f'show_recommendation_2'
-                                }))
-            self.send_message(from_id, message, keyboard.get_keyboard())
-        elif ('button' in payload and
-              'show_recommendation' in payload['button']):
-            page = int(payload['button'].split('_')[2])
-            recommendation = self.database_session.query(UserStatuses).filter(
-                UserStatuses.user_id == from_id).first()
-            recommendation = recommendation.subjects.split('&')
-            groups_ids = self.database_session.query(GroupsIds).filter(or_(
-                GroupsIds.subject == recommendation[0],
-                GroupsIds.subject == recommendation[1],
-                GroupsIds.subject == recommendation[2])).all()
-            show_groups = groups_ids[(page - 1) * 10:page * 10]
-            message = f'Страница {page}:\n'
-            message += '\n'.join([
-                f'{i + 1}. {show_groups[i].name} -- '
-                f'https://vk.com/club{show_groups[i].group_id}'
-                for i in range(len(show_groups))
-            ])
-            keyboard = VkKeyboard(one_time=True)
-            keyboard.add_button('Начать анализ повторно',
-                                color=VkKeyboardColor.SECONDARY,
-                                payload=json.dumps(
-                                    {'button': 'start_analysis'}))
-            keyboard.add_line()
-            page_number = page - 1 if page > 1 else len(
-                groups_ids) // 10 + 1
-            keyboard.add_button(f'Страница {page_number}',
-                                color=VkKeyboardColor.PRIMARY,
-                                payload=json.dumps({
-                                    'button':
-                                        f'show_recommendation_{page_number}'
-                                }))
-            page_number = (page + 1) % (len(groups_ids) // 10 + 1)
-            page_number = page_number or len(groups_ids) // 10 + 1
-            keyboard.add_button(f'Страница {page_number}',
-                                color=VkKeyboardColor.PRIMARY,
-                                payload=json.dumps({
-                                    'button':
-                                        f'show_recommendation_{page_number}'
-                                }))
-            self.send_message(from_id, message, keyboard.get_keyboard())
-            user_status = self.database_session.query(UserStatuses).filter(
-                UserStatuses.user_id == from_id).first()
-            user_status.status = 'show_page'
-            user_status.page = page
-            self.database_session.commit()
+            msg = 'Начнём анализ?'
+            self.send_message(from_id, msg, keyboard.get_keyboard())
 
 
 if __name__ == '__main__':
