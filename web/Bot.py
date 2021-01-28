@@ -1,9 +1,4 @@
-if __name__ == '__main__':
-    # Search imports in parent directory (for model.predictor)
-    import sys
-
-    sys.path.insert(0, '..')
-
+import os
 import json
 from typing import List, Union, Dict
 from operator import itemgetter
@@ -21,19 +16,20 @@ from database.models.GroupsIds import GroupsIds
 
 class Bot:
     def __init__(self):
-        self.group_token = ''  # ключ доступа группы
-        self.group_id = 0  # ID группы
-        self.service_token = ''  # сервисный ключ доступа (из приложения)
-        self.app_id = 0  # ID приложения
-        self.client_secret = ''  # защищённый ключ (из приложения)
-        self.predictor = Predictor('model\\weights')
+        group_token = os.environ['GROUP_TOKEN']
+        group_id = int(os.environ['GROUP_ID'])
+        service_token = os.environ['SERVICE_TOKEN']
+        app_id = int(os.environ['APP_ID'])
+        client_secret = os.environ['CLIENT_SECRET']
+
+        self.predictor = Predictor(os.path.join('model', 'weights'))
         self.database_session = db_session.create_session()
-        self.group_session = vk_api.VkApi(token=self.group_token,
+        self.group_session = vk_api.VkApi(token=group_token,
                                           api_version='5.126')
-        self.service_session = vk_api.VkApi(app_id=self.app_id,
-                                            token=self.service_token,
-                                            client_secret=self.client_secret)
-        self.long_poll = VkBotLongPoll(self.group_session, self.group_id)
+        self.service_session = vk_api.VkApi(app_id=app_id,
+                                            token=service_token,
+                                            client_secret=client_secret)
+        self.long_poll = VkBotLongPoll(self.group_session, group_id)
         self.group_api = self.group_session.get_api()
         self.service_api = self.service_session.get_api()
 
@@ -126,7 +122,12 @@ class Bot:
 
     def process_new_message(self, event):
         from_id = event.object['message']['from_id']
-        payload = json.loads(event.object['message']['payload'])
+
+        if 'payload' in event.object['message']:
+            payload = json.loads(event.object['message']['payload'])
+        else:
+            payload = {'command': 'start'}
+
         if 'command' in payload and payload['command'] == 'start':
             keyboard = VkKeyboard(one_time=True)
             keyboard.add_button('Начать анализ',
@@ -180,10 +181,10 @@ class Bot:
             user_status.page = 1
             self.database_session.commit()
 
-            message = 'На основе анализа было выявлено, что вас ' \
+            message = 'В ходе анализа было выявлено, что вас ' \
                       'интересуют следующие категории групп:\n'
-            message += '\n'.join([f'{i}. {category}' for i, category in
-                                  enumerate(prediction, 1)])
+            message += '\n'.join([f'{i}. {category.capitalize()}'
+                                  for i, category in enumerate(prediction, 1)])
 
             self.send_message(from_id, message)
             groups_ids = self.database_session.query(GroupsIds).filter(
@@ -192,6 +193,7 @@ class Bot:
                     GroupsIds.subject == prediction[2])
             ).all()
             show_groups = groups_ids[:10]
+            print(show_groups)
             message = 'Страница 1:\n'
             message += '\n'.join([
                 f'{i + 1}. {show_groups[i].name} -- '
