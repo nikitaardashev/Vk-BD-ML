@@ -325,6 +325,7 @@ class Bot:
                 gr_id = int(gr_id)
                 if gr_id > self.latest_id:
                     self.latest_id = gr_id
+                    cat = self.new_cats[int(cat)] if cat != '-1' else 'other'
                     old_group = self.db_session.query(
                         self.db.GroupsIds).get(self.latest_id)
                     self.db_session.add(self.db.Groups(group_id=self.latest_id,
@@ -347,14 +348,14 @@ class Bot:
             for i, cat in enumerate(self.new_cats):
                 keyboard.add_button(cat.capitalize(),
                                     color=VkKeyboardColor.SECONDARY,
-                                    payload=json.dumps({'button': f'dataset_filter#{group.group_id}#{cat}'}))
+                                    payload=json.dumps({'button': f'dataset_filter#{group.group_id}#{self.new_cats.index(cat)}'}))
                 if (i + 1) % 3 == 0:
                     keyboard.add_line()
             if (i + 1) % 3 != 0:
                 keyboard.add_line()
             keyboard.add_button('Ни к одной',
                                 color=VkKeyboardColor.NEGATIVE,
-                                payload=json.dumps({'button': f'dataset_filter#{group.group_id}#other'}))
+                                payload=json.dumps({'button': f'dataset_filter#{group.group_id}#-1'}))
             keyboard.add_button('Завершить',
                                 color=VkKeyboardColor.NEGATIVE,
                                 payload=json.dumps({'command': 'start'}))
