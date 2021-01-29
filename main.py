@@ -1,9 +1,10 @@
+import os
 from web import Bot
-from database import db_session
+from database.db_session import DataBase
 
 
 if __name__ == '__main__':
-    db_session.global_init('database/db.sqlite')
+    db = DataBase(os.environ.get('DATABASE_URL'))
 
-    bot = Bot()
+    bot = Bot(db)
     bot.listen()

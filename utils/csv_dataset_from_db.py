@@ -2,12 +2,10 @@ import os
 import csv
 import vk_api
 
-from database import db_session
-from database.models.Groups import Groups
 from utils.cleaner import Cleaner
 
 
-def csv_dataset_from_db(post_count=1, max_posts=None):
+def csv_dataset_from_db(db, post_count=1, max_posts=None):
     app_id = int(os.environ.get('APP_ID'))
     service_token = os.environ.get('SERVICE_TOKEN')
     client_secret = os.environ.get('CLIENT_SECRET')
@@ -15,18 +13,18 @@ def csv_dataset_from_db(post_count=1, max_posts=None):
                                    client_secret=client_secret)
     api = service_session.get_api()
 
-    session = db_session.create_session()
+    session = db.create_session()
     cleaner = Cleaner()
 
     posts_loaded = 0
     class_names = sorted(set([
         cat[0].lower()
-        for cat in session.query(Groups.subject).distinct(Groups.subject)
+        for cat in session.query(db.Groups.subject).distinct(db.Groups.subject)
     ]))
 
     with open('data/dataset.csv', 'w', encoding='utf-8') as f:
         csv_file = csv.writer(f, delimiter=',')
-        groups = session.query(Groups).order_by(Groups.group_id)
+        groups = session.query(db.Groups).order_by(db.Groups.group_id)
         total = groups.count()
         for i, group in enumerate(groups):
             if isinstance(max_posts, int) and posts_loaded >= max_posts:
