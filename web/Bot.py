@@ -183,13 +183,23 @@ class Bot:
         self.db_session.commit()
 
     def command_start_analysis(self, from_id):
+        texts = []
+
+        try:
+            group_ids = self.get_subscriptions(from_id)
+        except vk_api.exceptions.ApiError:
+            message = 'Ваш профиль закрыт, я не могу увидеть подписки'
+            keyboard = VkKeyboard(one_time=True)
+            keyboard.add_button('Теперь профиль открыт, начать анализ',
+                                color=VkKeyboardColor.POSITIVE,
+                                payload=json.dumps(
+                                    {'button': 'start_analysis'}))
+            self.send_message(from_id, message, keyboard.get_keyboard())
+            return
+
         message = ('Анализ может занять несколько минут. Пожалуйста, '
                    'подождите.')
         self.send_message(from_id, message)
-
-        texts = []
-
-        group_ids = self.get_subscriptions(from_id)
         for _id in group_ids:
             try:
                 posts = map(itemgetter('text'),

@@ -144,8 +144,6 @@ if __name__ == '__main__':
 
     export_model = tf.keras.Sequential([vectorize_layer, model])
     export_model.compile(get_optimizer(), loss_f, metrics)
-    # Input shape is determined from calling .predict()
-    export_model.predict(['лингвистика'])
     export_model.save_weights('model/weights/checkpoint')
 
     with open('model/weights/params.txt', 'w') as f:
