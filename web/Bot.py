@@ -21,6 +21,8 @@ class Bot:
         app_id = int(os.environ['APP_ID'])
         client_secret = os.environ['CLIENT_SECRET']
 
+        self.visited = set()
+
         self.admin_pwd = os.environ['ADMIN_PWD']
         self.new_cats = sorted(['физика', 'математика', 'лингвистика',
                                 'информатика', 'литература', 'химия',
@@ -155,13 +157,14 @@ class Bot:
             self.command_start(from_id)
 
     def command_start(self, from_id):
+
         keyboard = VkKeyboard(one_time=True)
         keyboard.add_button('Начать анализ',
                             color=VkKeyboardColor.POSITIVE,
                             payload=json.dumps({'button': 'start_analysis'}))
-        msg = ('Здравствуйте, я - бот. Я помогу вам определить ваши '
-               'интересы и подскажу, где найти ещё больше полезных '
-               'групп ВКонтакте. Начнём анализ?')
+        msg = ('Здравствуйте, я - Виталя, бот-рекомендатор. Я помогу вам '
+               'определить ваши интересы и подскажу, где найти ещё больше '
+               'полезных групп ВКонтакте. Начнём анализ?')
         user = self.db_session.query(self.db.UserStatuses).filter(
             self.db.UserStatuses.user_id == from_id).first()
         if user and user.subjects:
@@ -170,7 +173,9 @@ class Bot:
                                 payload=json.dumps(
                                     {'button': 'show_recommendation_1'}))
             msg = ('С возвращением! Желаете провести анализ снова или '
-                   'посмотреть, что я рекомендовал вам в прошлый раз?')
+                   'посмотреть, что я рекомендовал вам в прошлый раз?'
+                   if from_id in self.visited else 'Нужно нажать на кнопку')
+            self.visited.add(from_id)
         self.send_message(from_id, msg, keyboard.get_keyboard())
         user_status = self.db_session.query(self.db.UserStatuses).filter(
             self.db.UserStatuses.user_id == from_id).first()
