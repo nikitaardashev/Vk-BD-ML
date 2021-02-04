@@ -91,8 +91,7 @@ class Bot:
         except IndexError:
             print(f'error: {owner_id} {posts}')
 
-    def get_subscriptions(self, user_id: int,
-                          extended: bool = False) -> List[int]:
+    def get_subscriptions(self, user_id: int) -> List[int]:
         """
         gets user's subscriptions using method users.getSubscriptions
         (https://vk.com/dev/users.getSubscriptions)
@@ -103,11 +102,14 @@ class Bot:
         """
         subscriptions = self.service_api.users.getSubscriptions(
             user_id=user_id,
-            extended=int(extended)
+            extended=1
         )
         print(f'received subscriptions from '
               f'{"user" if user_id > 0 else "group"} {abs(user_id)}')
-        return subscriptions['groups']['items']
+        return [i['id'] for i in subscriptions['items']
+                if not i['is_closed'] and
+                'type' in i and
+                'deactivated' not in i]
 
     def get_group_info(self, group_id: int) -> Union[
         Dict[str, Union[str, int]], List[Dict[str, Union[str, int]]]
