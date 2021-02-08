@@ -2,7 +2,7 @@ import os
 import csv
 import vk_api
 
-from utils.cleaner import Cleaner
+from model.cleaner import Cleaner
 
 
 def csv_dataset_from_db(db, post_count=1, max_posts=None):

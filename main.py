@@ -5,11 +5,11 @@ from web import Bot
 from database.db_session import DataBase
 
 
-if __name__ == '__main__':
+def start_bot():
     db = DataBase(os.environ.get('DATABASE_URL'))
     log_dir = "https://dashboard.heroku.com/apps/vk-recommend/logs"
 
-    bot = Bot(db)
+    bot = Bot(db, os.environ.get("MODEL_NAME", 'yandex_low_rate'))
     if os.environ.get('IS_DEPLOY'):
         while True:
             try:
@@ -26,3 +26,7 @@ if __name__ == '__main__':
                 exit(1)
     else:
         bot.listen()
+
+
+if __name__ == '__main__':
+    start_bot()

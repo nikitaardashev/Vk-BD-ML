@@ -1,22 +1,21 @@
-import os
 from operator import itemgetter
 from tensorflow.keras import Sequential, layers
 from tensorflow.keras.layers.experimental.preprocessing import\
     TextVectorization
 
-from utils.cleaner import Cleaner
+from model.cleaner import Cleaner
 
 
 class Predictor:
-    def __init__(self, model_path):
-        with open(os.path.join(model_path, 'class_names.txt'),
+    def __init__(self, model_name):
+        with open(f'models/{model_name}/class_names.txt',
                   'r', encoding='utf-8') as f:
             self.class_names = f.readline().rstrip().split(',')
 
         self.cleaner = Cleaner()
 
         self.model = None
-        self.load_model(model_path)
+        self.load_model(model_name)
 
     def predict(self, text_list):
         """return list of class predictions based on list of strings"""
@@ -28,9 +27,9 @@ class Predictor:
                          for i, key in enumerate(self.class_names)]
         return sorted(probabilities, key=itemgetter(1), reverse=True)
 
-    def load_model(self, model_path):
+    def load_model(self, model_name):
         try:
-            with open(os.path.join(model_path, 'params.txt'), 'r') as f:
+            with open(f'models/{model_name}/params.txt', 'r') as f:
                 max_features = int(f.readline())
                 sequence_length = int(f.readline())
                 embedding_dim = int(f.readline())
@@ -52,7 +51,7 @@ class Predictor:
             layers.GlobalAveragePooling1D(),
             layers.Dropout(0.3),
             layers.Dense(len(self.class_names))])])
-        self.model.load_weights(os.path.join(model_path, 'checkpoint'))
+        self.model.load_weights(f'models/{model_name}/checkpoint')
         self.model.predict(["define", "input", "shape"])
 
 

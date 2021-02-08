@@ -1,6 +1,7 @@
 import os
 import json
 
+from random import sample
 from typing import List, Union, Dict
 from operator import itemgetter
 from sqlalchemy import or_
@@ -14,7 +15,7 @@ from model.predictor import Predictor
 
 
 class Bot:
-    def __init__(self, db):
+    def __init__(self, db, model_name):
         group_token = os.environ['GROUP_TOKEN']
         group_id = int(os.environ['GROUP_ID'])
         service_token = os.environ['SERVICE_TOKEN']
@@ -30,7 +31,7 @@ class Bot:
                                 "история", "музыка", "астрономия", "маркетинг",
                                 "биология", "спорт", "искусство", "бизнес"])
 
-        self.predictor = Predictor(os.path.join('model', 'weights'))
+        self.predictor = Predictor(model_name)
         self.db = db
         self.db_session = db.create_session()
         self.group_session = vk_api.VkApi(token=group_token,
@@ -91,13 +92,13 @@ class Bot:
         except IndexError:
             print(f'error: {owner_id} {posts}')
 
-    def get_subscriptions(self, user_id: int) -> List[int]:
+    def get_subscriptions(self, user_id: int, count=100) -> List[int]:
         """
         gets user's subscriptions using method users.getSubscriptions
         (https://vk.com/dev/users.getSubscriptions)
 
         :param user_id: user ID
-        :param extended: get extended information or not
+        :param count: get random {count} groups
         :return: list of numbers defining user IDs
         """
         subscriptions = self.service_api.users.getSubscriptions(
@@ -106,10 +107,11 @@ class Bot:
         )
         print(f'received subscriptions from '
               f'{"user" if user_id > 0 else "group"} {abs(user_id)}')
-        return [i['id'] for i in subscriptions['items']
-                if not i['is_closed'] and
-                'type' in i and
-                'deactivated' not in i]
+        ids = [i['id'] for i in subscriptions['items']
+               if not i['is_closed'] and
+               'type' in i and
+               'deactivated' not in i]
+        return ids if len(ids) <= count else sample(ids, count)
 
     def get_group_info(self, group_id: int) -> Union[
         Dict[str, Union[str, int]], List[Dict[str, Union[str, int]]]
@@ -232,38 +234,44 @@ class Bot:
                               for i, category in enumerate(prediction, 1)])
 
         self.send_message(from_id, message)
-        group_ids = self.db_session.query(self.db.GroupsIds).filter(
-            or_(self.db.GroupsIds.subject == prediction[0],
-                self.db.GroupsIds.subject == prediction[1],
-                self.db.GroupsIds.subject == prediction[2])
-        ).all()
-        show_groups = group_ids[:10]
-        print(show_groups)
-        message = 'Страница 1:\n'
-        message += '\n'.join([
-            f'{i + 1}. {show_groups[i].name} -- '
-            f'https://vk.com/club{show_groups[i].group_id} '
-            for i in range(len(show_groups))
-        ])
+
         keyboard = VkKeyboard(one_time=True)
         keyboard.add_button('Начать анализ повторно',
                             color=VkKeyboardColor.SECONDARY,
                             payload=json.dumps(
                                 {'button': 'start_analysis'}))
-        keyboard.add_line()
-        page_number = len(group_ids) // 10 + 1
-        keyboard.add_button(f'Страница {page_number}',
-                            color=VkKeyboardColor.PRIMARY,
-                            payload=json.dumps({
-                                'button':
-                                    f'show_recommendation_{page_number}'
-                            }))
-        keyboard.add_button(f'Страница 2',
-                            color=VkKeyboardColor.PRIMARY,
-                            payload=json.dumps({
-                                'button':
-                                    f'show_recommendation_2'
-                            }))
+
+        group_ids = self.db_session.query(self.db.GroupsIds).filter(
+            or_(self.db.GroupsIds.subject == prediction[0],
+                self.db.GroupsIds.subject == prediction[1],
+                self.db.GroupsIds.subject == prediction[2])
+        ).all()
+
+        if len(group_ids) > 0:
+            show_groups = group_ids[:10]
+            message = 'Страница 1:\n'
+            message += '\n'.join([
+                f'{i + 1}. {show_groups[i].name} -- '
+                f'https://vk.com/club{show_groups[i].group_id} '
+                for i in range(len(show_groups))
+            ])
+            page_number = len(group_ids) // 10 + 1
+
+            keyboard.add_line()
+            keyboard.add_button(f'Страница {page_number}',
+                                color=VkKeyboardColor.PRIMARY,
+                                payload=json.dumps({
+                                    'button':
+                                        f'show_recommendation_{page_number}'
+                                }))
+            keyboard.add_button(f'Страница 2',
+                                color=VkKeyboardColor.PRIMARY,
+                                payload=json.dumps({
+                                    'button':
+                                        f'show_recommendation_2'
+                                }))
+        else:
+            message = "Проанализировать ещё раз?"
         self.send_message(from_id, message, keyboard.get_keyboard())
 
     def command_show_recommendation(self, from_id, payload):
