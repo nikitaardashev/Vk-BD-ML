@@ -1,5 +1,6 @@
 import os
 from time import sleep
+from traceback import format_exc
 from requests.exceptions import ReadTimeout, ConnectionError
 from web import Bot
 from database.db_session import DataBase
@@ -19,10 +20,12 @@ def start_bot():
                 sleep(3)
             except Exception as e:
                 bot.send_message(159635403,
-                                 f'Произошла ошибка:\n{e}\n\n{log_dir}')
+                                 f'Произошла ошибка:\n{repr(e)}\n\n{log_dir}')
                 bot.send_message(399923740,
-                                 f'Произошла ошибка:\n{e}\n\n{log_dir}')
-                print(f'ERROR: {e}')
+                                 f'Произошла ошибка:\n{repr(e)}\n\n{log_dir}')
+                print('=== ERROR ===')
+                print(format_exc())
+                print('=============')
                 exit(1)
     else:
         bot.listen()
