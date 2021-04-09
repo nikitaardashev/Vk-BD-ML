@@ -16,7 +16,7 @@ from model.predictor import Predictor
 
 
 class Bot:
-    def __init__(self, db, model_name):
+    def __init__(self, users_db, groups_db, model_name):
         group_token = os.environ['GROUP_TOKEN']
         group_id = int(os.environ['GROUP_ID'])
         service_token = os.environ['SERVICE_TOKEN']
@@ -34,20 +34,22 @@ class Bot:
                                 "биология", "спорт", "искусство", "бизнес"])
 
         self.predictor = Predictor(model_name)
-        self.db = db
-        self.group_session = vk_api.VkApi(token=group_token,
+        self.users_db = users_db
+        self.groups_db = groups_db
+        self.groups_session = vk_api.VkApi(token=group_token,
                                           api_version='5.126')
         self.service_session = vk_api.VkApi(app_id=app_id,
                                             token=service_token,
                                             client_secret=client_secret)
-        self.long_poll = VkBotLongPoll(self.group_session, group_id)
-        self.group_api = self.group_session.get_api()
+        self.long_poll = VkBotLongPoll(self.groups_session, group_id)
+        self.group_api = self.groups_session.get_api()
         self.service_api = self.service_session.get_api()
 
         # For dataset filtering
-        db_session = db.create_session()
-        self.latest_id = db_session.query(db.Groups.group_id).order_by(
-            db.Groups.group_id.desc()).first()
+        groups_session = groups_db.create_session()
+        self.latest_id = groups_session.query(
+            groups_db.Groups.group_id).order_by(
+            groups_db.Groups.group_id.desc()).first()
         if self.latest_id is None:
             self.latest_id = 0
         else:
@@ -169,7 +171,7 @@ class Bot:
             self.command_start(from_id)
 
     def command_start(self, from_id):
-        db_session = self.db.create_session()
+        users_session = self.users_db.create_session()
         keyboard = VkKeyboard(one_time=True)
         keyboard.add_button('Начать анализ',
                             color=VkKeyboardColor.POSITIVE,
@@ -178,7 +180,7 @@ class Bot:
                'определить ваши интересы и подскажу, где найти ещё больше '
                'полезных групп ВКонтакте. Начнём анализ?')
 
-        user = self.get_user(from_id, db_session)
+        user = self.get_user(from_id, users_session)
         if user and user.subjects:
             keyboard.add_button('Перейти к рекомендациям',
                                 color=VkKeyboardColor.SECONDARY,
@@ -189,25 +191,26 @@ class Bot:
                    if from_id in self.visited else 'Нужно нажать на кнопку')
             self.visited.add(from_id)
         self.send_message(from_id, msg, keyboard.get_keyboard())
-        user_status = self.get_user(from_id, db_session)
+        user_status = self.get_user(from_id, users_session)
         if user_status:
             user_status.status = 'started'
         else:
-            db_session.add(
-                self.db.UserStatuses(user_id=from_id, status='started'))
+            users_session.add(
+                self.users_db.UserStatuses(user_id=from_id, status='started'))
             print(f'=== user {from_id} added')
-        db_session.commit()
+        users_session.commit()
 
     def command_start_analysis(self, from_id):
-        db_session = self.db.create_session()
+        users_session = self.users_db.create_session()
+        groups_session = self.groups_db.create_session()
         texts = []
 
-        user_status = self.get_user(from_id, db_session)
+        user_status = self.get_user(from_id, users_session)
         if not user_status:
-            db_session.add(
-                self.db.UserStatuses(user_id=from_id, status='started'))
+            users_session.add(
+                self.users_db.UserStatuses(user_id=from_id, status='started'))
             print(f'=== user {from_id} added (stranger analysis)')
-        db_session.commit()
+        users_session.commit()
 
         try:
             group_ids = self.get_subscriptions(from_id)
@@ -238,11 +241,11 @@ class Bot:
         prediction = list(map(itemgetter(0),
                               self.predictor.predict(texts)[:3]))
 
-        user_status = self.get_user(from_id, db_session)
+        user_status = self.get_user(from_id, users_session)
         user_status.subjects = '&'.join(prediction)
         user_status.status = 'show_page'
         user_status.page = 1
-        db_session.commit()
+        users_session.commit()
 
         message = 'В ходе анализа было выявлено, что вас ' \
                   'интересуют следующие категории групп:\n'
@@ -257,10 +260,10 @@ class Bot:
                             payload=json.dumps(
                                 {'button': 'start_analysis'}))
 
-        group_ids = db_session.query(self.db.GroupsIds).filter(
-            or_(self.db.GroupsIds.subject == prediction[0],
-                self.db.GroupsIds.subject == prediction[1],
-                self.db.GroupsIds.subject == prediction[2])
+        group_ids = groups_session.query(self.groups_db.Groups).filter(
+            or_(self.groups_db.Groups.subject == prediction[0],
+                self.groups_db.Groups.subject == prediction[1],
+                self.groups_db.Groups.subject == prediction[2])
         ).all()
 
         if len(group_ids) > 0:
@@ -293,15 +296,16 @@ class Bot:
         self.processing.discard(from_id)
 
     def command_show_recommendation(self, from_id, payload):
-        db_session = self.db.create_session()
+        users_session = self.users_db.create_session()
+        groups_session = self.groups_db.create_session()
 
         page = int(payload['button'].split('_')[2])
-        recommendation = self.get_user(from_id, db_session)
+        recommendation = self.get_user(from_id, users_session)
         recommendation = recommendation.subjects.split('&')
-        group_ids = db_session.query(self.db.GroupsIds).filter(or_(
-            self.db.GroupsIds.subject == recommendation[0],
-            self.db.GroupsIds.subject == recommendation[1],
-            self.db.GroupsIds.subject == recommendation[2])).all()
+        group_ids = groups_session.query(self.groups_db.Groups).filter(or_(
+            self.groups_db.Groups.subject == recommendation[0],
+            self.groups_db.Groups.subject == recommendation[1],
+            self.groups_db.Groups.subject == recommendation[2])).all()
         show_groups = group_ids[(page - 1) * 10:page * 10]
         message = f'Страница {page}:\n'
         message += '\n'.join([
@@ -332,13 +336,13 @@ class Bot:
                                     f'show_recommendation_{page_number}'
                             }))
         self.send_message(from_id, message, keyboard.get_keyboard())
-        user_status = self.get_user(from_id, db_session)
+        user_status = self.get_user(from_id, users_session)
         user_status.status = 'show_page'
         user_status.page = page
-        db_session.commit()
+        users_session.commit()
 
     def command_admin(self, from_id):
-        db_session = self.db.create_session()
+        users_session = self.users_db.create_session()
         print(f'*** {from_id} entered admin panel')
 
         keyboard = VkKeyboard(one_time=True)
@@ -351,18 +355,19 @@ class Bot:
         msg = 'Вы вошли в панель администратора'
         self.send_message(from_id, msg, keyboard.get_keyboard())
 
-        user_status = self.get_user(from_id, db_session)
+        user_status = self.get_user(from_id, users_session)
         if user_status:
             user_status.status = 'admin'
         else:
-            db_session.add(
-                self.db.UserStatuses(user_id=from_id, status='admin'))
-        db_session.commit()
+            users_session.add(
+                self.users_db.UserStatuses(user_id=from_id, status='admin'))
+        users_session.commit()
 
     def command_dataset_filter(self, from_id, payload):
-        db_session = self.db.create_session()
+        users_session = self.users_db.create_session()
+        groups_session = self.groups_db.create_session()
 
-        user_status = self.get_user(from_id, db_session)
+        user_status = self.get_user(from_id, users_session)
         if user_status.status == 'admin':
             if '#' in payload['button']:
                 _, gr_id, cat = payload['button'].split('#')
@@ -370,9 +375,9 @@ class Bot:
                 if gr_id > self.latest_id:
                     self.latest_id = gr_id
                     cat = self.new_cats[int(cat)] if cat != '-1' else 'other'
-                    old_group = db_session.query(
-                        self.db.GroupsIds).get(self.latest_id)
-                    db_session.add(self.db.Groups(group_id=self.latest_id,
+                    old_group = groups_session.query(
+                        self.groups_db.Groups).get(self.latest_id)
+                    users_session.add(self.groups_db.Groups(group_id=self.latest_id,
                                                        name=old_group.name,
                                                        subject=cat,
                                                        link=old_group.link))
@@ -382,9 +387,9 @@ class Bot:
                     msg = f'Группа {gr_id} уже была добавлена'
                 self.send_message(from_id, msg)
 
-            group = db_session.query(self.db.GroupsIds).order_by(
-                self.db.GroupsIds.group_id.asc()
-            ).filter(self.db.GroupsIds.group_id > self.latest_id).first()
+            group = groups_session.query(self.groups_db.Groups).order_by(
+                self.groups_db.Groups.group_id.asc()
+            ).filter(self.groups_db.Groups.group_id > self.latest_id).first()
 
             keyboard = VkKeyboard(one_time=True)
             msg = ('К какой категории относится эта группа?\n'
@@ -413,6 +418,6 @@ class Bot:
             msg = 'Начнём анализ?'
             self.send_message(from_id, msg, keyboard.get_keyboard())
     
-    def get_user(self, user_id, db_session):
-        return db_session.query(self.db.UserStatuses).filter(
-            self.db.UserStatuses.user_id == user_id).first()
+    def get_user(self, user_id, users_session):
+        return users_session.query(self.users_db.UserStatuses).filter(
+            self.users_db.UserStatuses.user_id == user_id).first()

@@ -7,10 +7,13 @@ from database.db_session import DataBase
 
 
 def start_bot():
-    db = DataBase(os.environ.get('DATABASE_URL'))
+    users_db = DataBase(os.environ.get('DATABASE_URL'))
+    groups_db = DataBase(
+        'sqlite:///database/db.sqlite?check_same_thread=false')
     log_dir = "https://dashboard.heroku.com/apps/vk-recommend/logs"
+    model_name = os.environ.get("MODEL_NAME", 'vk_not_filtered')
 
-    bot = Bot(db, os.environ.get("MODEL_NAME", 'yandex_low_rate'))
+    bot = Bot(users_db, groups_db, model_name)
     if os.environ.get('IS_DEPLOY'):
         while True:
             try:
