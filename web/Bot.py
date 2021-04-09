@@ -178,8 +178,7 @@ class Bot:
                'определить ваши интересы и подскажу, где найти ещё больше '
                'полезных групп ВКонтакте. Начнём анализ?')
 
-        user = db_session.query(self.db.UserStatuses).filter(
-            self.db.UserStatuses.user_id == from_id).first()
+        user = self.get_user(from_id, db_session)
         if user and user.subjects:
             keyboard.add_button('Перейти к рекомендациям',
                                 color=VkKeyboardColor.SECONDARY,
@@ -190,8 +189,7 @@ class Bot:
                    if from_id in self.visited else 'Нужно нажать на кнопку')
             self.visited.add(from_id)
         self.send_message(from_id, msg, keyboard.get_keyboard())
-        user_status = db_session.query(self.db.UserStatuses).filter(
-            self.db.UserStatuses.user_id == from_id).first()
+        user_status = self.get_user(from_id, db_session)
         if user_status:
             user_status.status = 'started'
         else:
@@ -202,8 +200,14 @@ class Bot:
 
     def command_start_analysis(self, from_id):
         db_session = self.db.create_session()
-        self.processing.add(from_id)
         texts = []
+
+        user_status = self.get_user(from_id, db_session)
+        if not user_status:
+            db_session.add(
+                self.db.UserStatuses(user_id=from_id, status='started'))
+            print(f'=== user {from_id} added (stranger analysis)')
+        db_session.commit()
 
         try:
             group_ids = self.get_subscriptions(from_id)
@@ -220,6 +224,8 @@ class Bot:
         message = ('Анализ может занять несколько минут. Пожалуйста, '
                    'подождите.')
         self.send_message(from_id, message)
+        self.processing.add(from_id)
+
         for _id in group_ids:
             try:
                 posts = map(itemgetter('text'),
@@ -232,8 +238,7 @@ class Bot:
         prediction = list(map(itemgetter(0),
                               self.predictor.predict(texts)[:3]))
 
-        user_status = db_session.query(self.db.UserStatuses).filter(
-            self.db.UserStatuses.user_id == from_id).first()
+        user_status = self.get_user(from_id, db_session)
         user_status.subjects = '&'.join(prediction)
         user_status.status = 'show_page'
         user_status.page = 1
@@ -291,8 +296,7 @@ class Bot:
         db_session = self.db.create_session()
 
         page = int(payload['button'].split('_')[2])
-        recommendation = db_session.query(self.db.UserStatuses).filter(
-            self.db.UserStatuses.user_id == from_id).first()
+        recommendation = self.get_user(from_id, db_session)
         recommendation = recommendation.subjects.split('&')
         group_ids = db_session.query(self.db.GroupsIds).filter(or_(
             self.db.GroupsIds.subject == recommendation[0],
@@ -328,8 +332,7 @@ class Bot:
                                     f'show_recommendation_{page_number}'
                             }))
         self.send_message(from_id, message, keyboard.get_keyboard())
-        user_status = db_session.query(self.db.UserStatuses).filter(
-            self.db.UserStatuses.user_id == from_id).first()
+        user_status = self.get_user(from_id, db_session)
         user_status.status = 'show_page'
         user_status.page = page
         db_session.commit()
@@ -348,8 +351,7 @@ class Bot:
         msg = 'Вы вошли в панель администратора'
         self.send_message(from_id, msg, keyboard.get_keyboard())
 
-        user_status = db_session.query(self.db.UserStatuses).filter(
-            self.db.UserStatuses.user_id == from_id).first()
+        user_status = self.get_user(from_id, db_session)
         if user_status:
             user_status.status = 'admin'
         else:
@@ -360,8 +362,7 @@ class Bot:
     def command_dataset_filter(self, from_id, payload):
         db_session = self.db.create_session()
 
-        user_status = db_session.query(self.db.UserStatuses).filter(
-            self.db.UserStatuses.user_id == from_id).first()
+        user_status = self.get_user(from_id, db_session)
         if user_status.status == 'admin':
             if '#' in payload['button']:
                 _, gr_id, cat = payload['button'].split('#')
@@ -411,3 +412,7 @@ class Bot:
                                     {'button': 'start_analysis'}))
             msg = 'Начнём анализ?'
             self.send_message(from_id, msg, keyboard.get_keyboard())
+    
+    def get_user(self, user_id, db_session):
+        return db_session.query(self.db.UserStatuses).filter(
+            self.db.UserStatuses.user_id == user_id).first()
