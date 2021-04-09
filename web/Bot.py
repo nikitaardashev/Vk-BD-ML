@@ -75,24 +75,13 @@ class Bot:
         print(f'<-- message {message[:30]}{"..." if len(message) > 30 else ""}'
               f' to {user_id} has been sent')
 
-    def get_posts(self,
-                  owner_id: int,
-                  count: int = 1) -> Union[List[dict], dict]:
-        """
-        gets posts from user's or group's wall using method wall.get
-        (https://vk.com/dev/wall.get)
-
-        :param owner_id: wall's owner ID
-        :param count: count of posts
-        :return: list of dictionaries of dictionary, describing post
-        """
+    def get_posts(self, owner_id, texts, count=1):
         posts = self.service_api.wall.get(owner_id=owner_id, count=count)
-        print(f'group {owner_id} posts received')
         try:
-            if len(posts['items']) > 1:
-                return posts['items']
-            else:
-                return posts['items'][0]
+            posts = map(itemgetter('text'),
+                        filter(lambda x: not x['marked_as_ads'],
+                               posts['items']))
+            texts.append('\n'.join(posts))
         except IndexError:
             print(f'error: {owner_id} {posts}')
 
@@ -229,14 +218,14 @@ class Bot:
         self.send_message(from_id, message)
         self.processing.add(from_id)
 
-        for _id in group_ids:
+        for _id in group_ids[:100]:
             try:
-                posts = map(itemgetter('text'),
-                            filter(lambda x: not x['marked_as_ads'],
-                                   self.get_posts(-_id, 10)))
-                texts.append('\n'.join(posts))
+                self.get_posts(-_id, texts, 10)
+                print(f'group {_id} posts received (user {from_id})')
             except TypeError:
                 continue
+
+        print("Predicting...")
 
         prediction = list(map(itemgetter(0),
                               self.predictor.predict(texts)[:3]))
@@ -247,8 +236,8 @@ class Bot:
         user_status.page = 1
         users_session.commit()
 
-        message = 'В ходе анализа было выявлено, что вас ' \
-                  'интересуют следующие категории групп:\n'
+        message = ('В ходе анализа было выявлено, что вас '
+                   'интересуют следующие категории групп:\n')
         message += '\n'.join([f'{i}. {category.capitalize()}'
                               for i, category in enumerate(prediction, 1)])
 
